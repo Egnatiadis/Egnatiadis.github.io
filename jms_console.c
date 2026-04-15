@@ -12,66 +12,54 @@ int main(int argc, char *argv[]) {
     char *oper_file = NULL;
     int opt;
 
-    // Parsing των ορισμάτων 
     while ((opt = getopt(argc, argv, "w:r:o:")) != -1) {
         switch (opt) {
-            case 'w': 
-                jms_in = optarg; 
-                break;
-            case 'r': 
-                jms_out = optarg; 
-                break;
-            case 'o': 
-                oper_file = optarg; 
-                break;
-            default: 
-                fprintf(stderr, "Usage: %s -w <jms_in> -r <jms_out> [-o <ops_file>]\n", argv[0]);
-                exit(EXIT_FAILURE);
+            case 'w': jms_in = optarg; break;
+            case 'r': jms_out = optarg; break;
+            case 'o': oper_file = optarg; break;
+            default: exit(EXIT_FAILURE);
         }
     }
 
     if (jms_in == NULL || jms_out == NULL) {
-        fprintf(stderr, "Missing required arguments -w and -r\n");
+        fprintf(stderr, "Usage: %s -w <jms_in> -r <jms_out> [-o <ops_file>]\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    printf("JMS Console started.\n");
-    printf("Sending to: %s | Reading from: %s\n", jms_in, jms_out);
+    int fd_write = open(jms_in, O_WRONLY);
+    if (fd_write == -1) { perror("Console: Error opening write pipe"); exit(1); }
+    
+    int fd_read = open(jms_out, O_RDONLY);
+    if (fd_read == -1) { perror("Console: Error opening read pipe"); exit(1); }
 
-    FILE *input_stream = stdin;
-    if (oper_file != NULL) {
-        input_stream = fopen(oper_file, "r");
-        if (input_stream == NULL) {
-            perror("Error opening operations file");
-            exit(EXIT_FAILURE);
-        }
-        printf("Reading commands from file: %s\n", oper_file);
-    } else {
-        printf("Reading commands from STDIN (Type your commands):\n");
-    }
+    FILE *input_stream = (oper_file != NULL) ? fopen(oper_file, "r") : stdin;
+    if (input_stream == NULL) { perror("Error opening input"); exit(1); }
+
     char *line = NULL;
     size_t len = 0;
     ssize_t nread;
+    char response[1024];
+
+    printf("JMS Console ready. Enter commands:\n");
 
     while ((nread = getline(&line, &len, input_stream)) != -1) {
-        if (nread > 0 && line[nread - 1] == '\n') {
-            line[nread - 1] = '\0';
-        }
+        if (nread > 0 && line[nread - 1] == '\n') line[nread - 1] = '\0';
 
-        // Check and edit line
         if (strlen(line) > 0) {
-            printf("Command received: %s\n", line);
-        
+            write(fd_write, line, strlen(line) + 1);
+            ssize_t n = read(fd_read, response, sizeof(response) - 1);
+            if (n > 0) {
+                response[n] = '\0';
+                printf("Server response: %s\n", response);
+            }
+
             if (strcmp(line, "exit") == 0) break;
         }
     }
 
-    // CLEAR
     free(line);
-    if (oper_file != NULL) {
-        fclose(input_stream);
-    }
-
-    printf("JMS Console exiting safely.\n");
+    if (oper_file != NULL) fclose(input_stream);
+    close(fd_write);
+    close(fd_read);
     return 0;
 }
