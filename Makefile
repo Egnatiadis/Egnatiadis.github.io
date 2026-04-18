@@ -14,3 +14,4 @@ jms_pool: jms_pool.c
 
 clean:
 	rm -f jms_coord jms_console jms_pool jms_in jms_out pool_in_* pool_out_*
+	rm -rf outputs_*
