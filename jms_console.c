@@ -26,31 +26,31 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    // Άνοιγμα pipes (Η σειρά είναι σημαντική για να μην κλειδώσουν οι διεργασίες)
     int fd_write = open(jms_in, O_WRONLY);
-    if (fd_write == -1) { perror("Console: Error opening write pipe"); exit(1); }
+    if (fd_write == -1) exit(1);
     
     int fd_read = open(jms_out, O_RDONLY);
-    if (fd_read == -1) { perror("Console: Error opening read pipe"); exit(1); }
+    if (fd_read == -1) exit(1);
 
     FILE *input_stream = (oper_file != NULL) ? fopen(oper_file, "r") : stdin;
-    if (input_stream == NULL) { perror("Error opening input"); exit(1); }
+    if (input_stream == NULL) exit(1);
 
     char *line = NULL;
     size_t len = 0;
     ssize_t nread;
-    char response[1024];
-
-    printf("JMS Console ready. Enter commands:\n");
+    char response[2048];
 
     while ((nread = getline(&line, &len, input_stream)) != -1) {
         if (nread > 0 && line[nread - 1] == '\n') line[nread - 1] = '\0';
 
         if (strlen(line) > 0) {
             write(fd_write, line, strlen(line) + 1);
+
             ssize_t n = read(fd_read, response, sizeof(response) - 1);
             if (n > 0) {
                 response[n] = '\0';
-                printf("Server response: %s\n", response);
+                printf("%s\n", response);
             }
 
             if (strcmp(line, "exit") == 0) break;
