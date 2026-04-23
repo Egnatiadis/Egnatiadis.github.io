@@ -31,7 +31,6 @@ void execute(int id, char* cmd, char* path) {
     pid_t p = fork();
     if (p == 0) {
         char dir[512], out[550], err[550];
-        // Μορφή φακέλου ακριβώς όπως η εκφώνηση: outputs_jid_pid_date_time
         sprintf(dir, "%s/outputs_%d_%d_%04d%02d%02d_%02d%02d%02d", path, id, getpid(), 
                 tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
         mkdir(dir, 0777);
