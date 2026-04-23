@@ -5,110 +5,104 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <errno.h>
+#include <signal.h>
 
-#define MAX_POOLS 10
+#define MAX_POOLS 50
 
 typedef struct {
     pid_t pid;
     int job_count;
     int fd_in;
     int fd_out;
-} PoolInfo;
+    char p_in[64];
+    char p_out[64];
+} Pool;
 
 int main(int argc, char *argv[]) {
-    char *path = NULL;
-    int jobs_pool_limit = 0;
-    int opt;
-
+    char *path = NULL; int limit = 0, opt;
     while ((opt = getopt(argc, argv, "l:n:")) != -1) {
-        switch (opt) {
-            case 'l': path = optarg; break;
-            case 'n': jobs_pool_limit = atoi(optarg); break;
-            default: exit(1);
-        }
+        if (opt == 'l') path = optarg; else if (opt == 'n') limit = atoi(optarg);
     }
+    if (!path || limit <= 0) exit(1);
 
-    if (path == NULL || jobs_pool_limit <= 0) exit(1);
-
-    unlink("jms_in");
-    unlink("jms_out");
-    if (mkfifo("jms_in", 0666) == -1 || mkfifo("jms_out", 0666) == -1) exit(1);
-
-    int fd_read_cons = open("jms_in", O_RDONLY);
-    int fd_write_cons = open("jms_out", O_WRONLY);
-
-    PoolInfo pools[MAX_POOLS];
-    int active_pools = 0;
-    int total_jobs = 0;
-
-    char buffer[1024];
-    ssize_t n;
-    
-    while ((n = read(fd_read_cons, buffer, sizeof(buffer) - 1)) > 0) {
-        buffer[n] = '\0';
-        
-        if (strncmp(buffer, "submit ", 7) == 0) {
-            total_jobs++;
-            int assigned = 0;
-
-            for (int i = 0; i < active_pools; i++) {
-                if (pools[i].job_count < jobs_pool_limit) {
-                    char pool_msg[1024];
-                    snprintf(pool_msg, sizeof(pool_msg), "SUBMIT %d %s", total_jobs, buffer + 7);
-                    write(pools[i].fd_in, pool_msg, strlen(pool_msg) + 1);
-                    pools[i].job_count++;
-                    assigned = 1;
-                    
-                    char ack[128];
-                    snprintf(ack, sizeof(ack), "JobID: %d, PID: %d", total_jobs, pools[i].pid);
-                    write(fd_write_cons, ack, strlen(ack) + 1);
-                    break;
-                }
-            }
-            if (!assigned && active_pools < MAX_POOLS) {
-                char p_in[32], p_out[32];
-                snprintf(p_in, 32, "p_in_%d", active_pools);
-                snprintf(p_out, 32, "p_out_%d", active_pools);
-                unlink(p_in); unlink(p_out);
-                mkfifo(p_in, 0666); mkfifo(p_out, 0666);
-
-                pid_t pid = fork();
-                if (pid == 0) {
-                    execl("./jms_pool", "./jms_pool", p_in, p_out, path, NULL);
-                    exit(1);
-                } else {
-                    pools[active_pools].pid = pid;
-                    pools[active_pools].job_count = 1;
-                    pools[active_pools].fd_in = open(p_in, O_WRONLY);
-                    pools[active_pools].fd_out = open(p_out, O_RDONLY);
-                    
-                    char pool_msg[1024];
-                    snprintf(pool_msg, sizeof(pool_msg), "SUBMIT %d %s", total_jobs, buffer + 7);
-                    write(pools[active_pools].fd_in, pool_msg, strlen(pool_msg) + 1);
-                    
-                    char ack[128];
-                    snprintf(ack, sizeof(ack), "JobID: %d, PID: %d", total_jobs, pid);
-                    write(fd_write_cons, ack, strlen(ack) + 1);
-                    active_pools++;
-                }
-            }
-        } else if (strcmp(buffer, "shutdown") == 0) {
-            for(int i=0; i<active_pools; i++) {
-                write(pools[i].fd_in, "SHUTDOWN", 9);
-                close(pools[i].fd_in); close(pools[i].fd_out);
-            }
-            char stats[128];
-            snprintf(stats, sizeof(stats), "Served %d jobs, 0 were still in progress", total_jobs);
-            write(fd_write_cons, stats, strlen(stats) + 1);
-            break;
-        } else {
-            write(fd_write_cons, "Command processed", 18);
-        }
-        if (strcmp(buffer, "exit") == 0) break;
-    }
-
-    close(fd_read_cons); close(fd_write_cons);
     unlink("jms_in"); unlink("jms_out");
+    mkfifo("jms_in", 0666); mkfifo("jms_out", 0666);
+    int fdr = open("jms_in", O_RDONLY);
+    int fdw = open("jms_out", O_WRONLY);
+
+    Pool pools[MAX_POOLS];
+    int p_count = 0, total_j = 0;
+    char buf[2048];
+
+    while (read(fdr, buf, sizeof(buf)-1) > 0) {
+        buf[strcspn(buf, "\n\r")] = 0;
+        if (strlen(buf) == 0) continue;
+
+        if (strncmp(buf, "submit ", 7) == 0) {
+            total_j++;
+            int target = -1;
+            for(int i=0; i<p_count; i++) if(pools[i].job_count < limit) { target=i; break; }
+            if (target == -1 && p_count < MAX_POOLS) {
+                target = p_count++;
+                sprintf(pools[target].p_in, "p%d_in", target); 
+                sprintf(pools[target].p_out, "p%d_out", target);
+                mkfifo(pools[target].p_in, 0666); mkfifo(pools[target].p_out, 0666);
+                pid_t pid = fork();
+                if (pid == 0) { execl("./jms_pool", "./jms_pool", pools[target].p_in, pools[target].p_out, path, NULL); exit(1); }
+                pools[target].pid = pid;
+                pools[target].fd_in = open(pools[target].p_in, O_WRONLY);
+                pools[target].fd_out = open(pools[target].p_out, O_RDONLY);
+                pools[target].job_count = 0;
+            }
+            char m[2048]; sprintf(m, "SUBMIT %d %s", total_j, buf+7);
+            write(pools[target].fd_in, m, strlen(m)+1);
+            pools[target].job_count++;
+            char ack[128]; read(pools[target].fd_out, ack, 128);
+            write(fdw, ack, strlen(ack)+1);
+        }
+        else if (strcmp(buf, "show-pools") == 0) {
+            char res[2048] = "Pool & NumOfJobs:";
+            for(int i=0; i<p_count; i++) {
+                char tmp[64]; sprintf(tmp, "\n%d %d", pools[i].pid, pools[i].job_count);
+                strcat(res, tmp);
+            }
+            write(fdw, res, strlen(res)+1);
+        }
+        else if (strncmp(buf, "status", 6) == 0 || strncmp(buf, "suspend", 7) == 0 || 
+                 strncmp(buf, "resume", 6) == 0 || strcmp(buf, "show-active") == 0 || 
+                 strcmp(buf, "show-finished") == 0) {
+            char final[4096] = "";
+            int is_status = (strncmp(buf, "status", 6) == 0);
+            
+            // Προσθήκη Headers μόνο αν η εντολή το απαιτεί
+            if(strcmp(buf, "show-active") == 0) strcpy(final, "Active jobs:");
+            else if(strcmp(buf, "show-finished") == 0) strcpy(final, "Finished jobs:");
+
+            for(int i=0; i<p_count; i++) {
+                write(pools[i].fd_in, buf, strlen(buf)+1);
+                char temp[2048]; int n = read(pools[i].fd_out, temp, 2048);
+                if(n > 0) { 
+                    temp[n] = '\0'; 
+                    if(strcmp(temp, "NONE") != 0) strcat(final, temp); 
+                }
+            }
+            if(strlen(final) == 0 && is_status) strcpy(final, "JobID not found");
+            write(fdw, final, strlen(final)+1);
+        }
+        else if (strcmp(buf, "shutdown") == 0) {
+            int in_prog = 0;
+            for(int i=0; i<p_count; i++) {
+                kill(pools[i].pid, SIGTERM);
+                char p_res[128]; read(pools[i].fd_out, p_res, 128);
+                in_prog += atoi(p_res);
+                close(pools[i].fd_in); close(pools[i].fd_out);
+                unlink(pools[i].p_in); unlink(pools[i].p_out);
+            }
+            char stat[128]; sprintf(stat, "Served %d jobs, %d were still in progress", total_j, in_prog);
+            write(fdw, stat, strlen(stat)+1);
+            break;
+        }
+        memset(buf, 0, sizeof(buf));
+    }
     return 0;
 }

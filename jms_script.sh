@@ -1,62 +1,64 @@
 #!/bin/bash
 
-# Έλεγχος ορισμάτων
-if [ $# -lt 4 ]; then
+# Αρχικοποίηση μεταβλητών
+LOG_DIR=""
+COMMAND=""
+N_VALUE=""
+
+# Parsing των ορισμάτων (η σειρά δεν είναι προκαθορισμένη)
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -l) LOG_DIR="$2"; shift ;;
+        -c) 
+            COMMAND="$2"
+            # Έλεγχος αν μετά το size υπάρχει αριθμός n
+            if [[ "$COMMAND" == "size" && "$3" =~ ^[0-9]+$ ]]; then
+                N_VALUE="$3"
+                shift
+            fi
+            shift ;;
+        *) shift ;;
+    esac
+done
+
+# Έλεγχος αν δόθηκαν τα βασικά ορίσματα
+if [[ -z "$LOG_DIR" || -z "$COMMAND" ]]; then
     echo "Usage: $0 -l <path> -c <command> [n]"
     exit 1
 fi
 
-PATH_DIR=""
-COMMAND=""
-N_VAL=""
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -l)
-            PATH_DIR="$2"
-            shift 2
-            ;;
-        -c)
-            COMMAND="$2"
-            shift 2
-            ;;
-        *)
-            N_VAL="$1"
-            shift
-            ;;
-    esac
-done
-
-if [ ! -d "$PATH_DIR" ]; then
-    echo "Error: Directory $PATH_DIR does not exist."
+if [ ! -d "$LOG_DIR" ]; then
+    echo "Error: Directory $LOG_DIR does not exist."
     exit 1
 fi
 
 case $COMMAND in
     list)
-        ls -d "$PATH_DIR"/outputs_* 2>/dev/null
+        # Παρουσιάζει λίστα από τους καταλόγους των εργασιών
+        echo "Job directories in $LOG_DIR:"
+        ls -d "$LOG_DIR"/outputs_* 2>/dev/null
         ;;
-    size*)
-        # Αν το COMMAND είναι π.χ. "size 5", το διασπάμε
-        CMD_PART=$(echo $COMMAND | cut -d' ' -f1)
-        NUM_PART=$(echo $COMMAND | cut -d' ' -f2)
-        
-        # Αν δεν βρέθηκε νούμερο στο COMMAND, δες τη μεταβλητή N_VAL
-        if [ "$CMD_PART" == "$NUM_PART" ]; then NUM_PART=$N_VAL; fi
 
-        if [ -z "$NUM_PART" ]; then
-            du -sk "$PATH_DIR"/outputs_* 2>/dev/null | sort -n
+    size)
+        # Ταξινόμηση κατά αύξουσα σειρά μεγέθους (du -s)
+        # Αν δοθεί n, δείχνει μόνο τις n μεγαλύτερες τιμές (tail)
+        if [ -z "$N_VALUE" ]; then
+            du -s "$LOG_DIR"/outputs_* 2>/dev/null | sort -n
         else
-            du -sk "$PATH_DIR"/outputs_* 2>/dev/null | sort -n | tail -n "$NUM_PART"
+            du -s "$LOG_DIR"/outputs_* 2>/dev/null | sort -n | tail -n "$N_VALUE"
         fi
         ;;
+
     purge)
-        # Διαγραφή καταλόγων
-        rm -rf "$PATH_DIR"/outputs_*
+        # Διαγράφει όλους τους υφιστάμενους καταλόγους εργασιών
+        echo "Deleting all job directories in $LOG_DIR..."
+        rm -rf "$LOG_DIR"/outputs_*
         echo "Purge completed."
         ;;
+
     *)
         echo "Unknown command: $COMMAND"
+        echo "Available commands: list, size [n], purge"
         exit 1
         ;;
 esac
