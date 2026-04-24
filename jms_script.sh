@@ -1,7 +1,11 @@
+#!/bin/bash
+
+# Αρχικοποίηση μεταβλητών
 LOG_DIR=""
 COMMAND=""
 N_VALUE=""
 
+# Parsing των ορισμάτων (η σειρά δεν είναι προκαθορισμένη)
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -l) LOG_DIR="$2"; shift ;;
@@ -36,6 +40,8 @@ case $COMMAND in
         ;;
 
     size)
+        # Ταξινόμηση κατά αύξουσα σειρά μεγέθους (du -s)
+        # Αν δοθεί n, δείχνει μόνο τις n μεγαλύτερες τιμές (tail)
         if [ -z "$N_VALUE" ]; then
             du -s "$LOG_DIR"/outputs_* 2>/dev/null | sort -n
         else
@@ -44,6 +50,7 @@ case $COMMAND in
         ;;
 
     purge)
+        # Διαγράφει όλους τους υφιστάμενους καταλόγους εργασιών
         echo "Deleting all job directories in $LOG_DIR..."
         rm -rf "$LOG_DIR"/outputs_*
         echo "Purge completed."
